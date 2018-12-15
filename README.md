@@ -21,6 +21,7 @@ Hardware:
 - 3D Printed case: 
 
 ESP32 Pins (GND/VCC is obvious ;)
+```
 SENSOR_SDA 21
 SENSOR_SCL 22 
 TFT_MISO 19
@@ -29,3 +30,4 @@ TFT_SCLK 18
 TFT_CS   15
 TFT_DC    2
 TFT_RST   4 
+```
