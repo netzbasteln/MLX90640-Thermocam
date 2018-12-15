@@ -1,12 +1,12 @@
 # MLX90640-Thermocam
 
 We built a simple Thermal camera using the MLX90640 Sensor, an ESP32, a ILI9341 TFT, a 18650 battery in a 3D printed case. 
-It was featured in Netzbasteln #111: http://www.netzbasteln.de/#111
+It was featured in Netzbasteln #111: http://www.netzbasteln.de/#111 and still lacks interpolation.
 
 Code Based on:
 - Thermal Camera with image saving capability https://github.com/wilhelmzeuschner/arduino_thermal_camera_with_sd_and_img_processing
 - SparkFun MLX90640 Examples https://github.com/sparkfun/SparkFun_MLX90640_Arduino_Example
-- TFT_eSPI Library: https://github.com/Bodmer/
+- TFT_eSPI Library: https://github.com/Bodmer/ (use settings from Setup_User.h)
 
 Needs an ESP32 core fork:
 - https://github.com/sparkfun/SparkFun_MLX90640_Arduino_Example/issues/2
@@ -20,8 +20,7 @@ Hardware:
 - Battery 18650 
 - 3D Printed case: 
 
-ESP32 Pins (GND/VCC is obvious :):
-
+ESP32 Pins (GND/VCC is obvious ;)
 SENSOR_SDA 21
 SENSOR_SCL 22 
 TFT_MISO 19
@@ -30,5 +29,3 @@ TFT_SCLK 18
 TFT_CS   15
 TFT_DC    2
 TFT_RST   4 
-
-
