@@ -1,13 +1,13 @@
 /**
- * Based on: 
+ * Based on:
  * - https://github.com/wilhelmzeuschner/arduino_thermal_camera_with_sd_and_img_processing.
  * - https://github.com/sparkfun/SparkFun_MLX90640_Arduino_Example
- * 
+ *
  * Hardware:
  * - ESP32: https://www.espressif.com/en/products/hardware/esp32-devkitc/overview
  * - Sensor: https://shop.pimoroni.com/products/mlx90640-thermal-camera-breakout
  * - Display: https://www.amazon.de/gp/product/B07DPMV34R/, https://www.pjrc.com/store/display_ili9341.html
- * 
+ *
  * Needs an ESP32 core fork:
  * - https://github.com/sparkfun/SparkFun_MLX90640_Arduino_Example/issues/2
  * - https://github.com/stickbreaker/arduino-esp32
@@ -36,6 +36,7 @@
 #define min(a,b) ((a)<(b)?(a):(b))
 #define max(a,b) ((a)>(b)?(a):(b))
 
+#define EMMISIVITY 0.95
 
 const byte MLX90640_address = 0x33; //Default 7-bit unshifted address of the MLX90640
 #define TA_SHIFT 8 //Default shift for MLX90640 in open air
@@ -50,7 +51,6 @@ boolean measure = true;
 float centerTemp;
 unsigned long tempTime = millis();
 unsigned long tempTime2 = 0;
-unsigned long batteryTime = 1;
 
 // start with some initial colors
 float minTemp = 20.0;
@@ -65,9 +65,15 @@ float intPoint, val, a, b, c, d, ii;
 int x, y, i, j;
 
 
-// array for the 32 x 24 measured pixels
-static float pixels[768];
+// array for the 32 x 24 measured tempValues
+static float tempValues[32*24];
 
+// Output size
+#define O_WIDTH 224
+#define O_HEIGHT 168
+#define O_RATIO O_WIDTH/32
+
+float *interpolated[O_HEIGHT];
 
 
 void setup() {
@@ -104,6 +110,16 @@ void setup() {
   //Display.setRotation(3);
   Display.fillScreen(C_BLACK);
 
+
+  // Prepare interpolated array
+  for (int i=0; i<O_HEIGHT; i++) {
+    interpolated[i] = (float *)malloc(O_WIDTH * sizeof(float));
+    if (!interpolated[i]) {
+      Serial.println("Out of memory :(");
+    }
+  }
+
+
   // get the cutoff points for the color interpolation routines
   // note this function called when the temp scale is changed
   setAbcd();
@@ -114,17 +130,16 @@ void setup() {
 void loop() {
   tempTime = millis();
 
-  readPixels();
+  readTempValues();
   setTempScale();
+  interpolate();
   drawPicture();
   drawMeasurement();
 }
 
 
 // Read pixel data from MLX90640.
-void readPixels() {
-  float emissivity = 0.95;
-  
+void readTempValues() {
   for (byte x = 0 ; x < 2 ; x++) //Read both subpages
   {
     uint16_t mlx90640Frame[834];
@@ -138,21 +153,49 @@ void readPixels() {
     float vdd = MLX90640_GetVdd(mlx90640Frame, &mlx90640);
     float Ta = MLX90640_GetTa(mlx90640Frame, &mlx90640);
 
-    float tr = Ta - TA_SHIFT; //Reflected temperature based on the sensor ambient temperature  
+    float tr = Ta - TA_SHIFT; //Reflected temperature based on the sensor ambient temperature
 
-    MLX90640_CalculateTo(mlx90640Frame, &mlx90640, emissivity, tr, pixels);
+    MLX90640_CalculateTo(mlx90640Frame, &mlx90640, EMMISIVITY, tr, tempValues);
   }
 }
 
 
-// Show 32x24 sensor data on the top part of the 240x320 screen.
-void drawPicture() {
-  for (y=0; y<24; y++) {
-    for (x=0; x<32; x++) {
-      Display.fillRect(8 + x*7, 8 + y*7, 7, 7, getColor(pixels[(31-x) + (y*32)]));
+int row;
+float temp, temp2;
+
+void interpolate() {
+  for (row=0; row<24; row++) {
+    for (x=0; x<O_WIDTH; x++) {
+      temp =  tempValues[(31 - (x/7)) + (row*32)];
+      temp2 = tempValues[(31 - (x/7)) + (row*32) + 1]; //
+      interpolated[row*7][x] = lerp(temp2, temp, x%7/7.0);
+    }
+  }
+
+  for (x=0; x<O_WIDTH; x++) {
+    for (y=0; y<O_HEIGHT; y++) {
+      temp =  interpolated[(y/7)*7][x];
+      temp2 = interpolated[((y/7+1)*7)][x];
+      interpolated[y][x] = lerp(temp2, temp, y%7/7.0);
     }
   }
 }
+
+
+// Helper for linear interpolation
+float lerp(float v0, float v1, float t) {
+  return (1 - t) * v0 + t * v1;
+}
+
+
+void drawPicture() {
+  for (y=0; y<=O_HEIGHT; y++) {
+    for (x=0; x<O_WIDTH; x++) {
+      Display.drawPixel(8 + x, 8 + y, getColor(interpolated[y][x]));
+    }
+  }
+}
+
 
 
 // Get color for temp value.
@@ -164,7 +207,7 @@ uint16_t getColor(float val) {
 
     equations based on
     http://web-tech.ga-usa.com/2012/05/creating-a-custom-hot-to-cold-temperature-color-gradient-for-use-with-rrdtool/index.html
-    
+
   */
 
   red = constrain(255.0 / (c - b) * val - ((b * 255.0) / (c - b)), 0, 255);
@@ -202,8 +245,8 @@ void setTempScale() {
   maxTemp = 0;
 
   for (i = 0; i < 768; i++) {
-    minTemp = min(minTemp, pixels[i]);
-    maxTemp = max(maxTemp, pixels[i]);
+    minTemp = min(minTemp, tempValues[i]);
+    maxTemp = max(maxTemp, tempValues[i]);
   }
 
   setAbcd();
@@ -249,7 +292,7 @@ void drawMeasurement() {
   Display.drawCircle(120, 8+84, 3, TFT_WHITE);
 
   // Measure and print center temperature
-  centerTemp = (pixels[383 - 16] + pixels[383 - 15] + pixels[384 + 15] + pixels[384 + 16]) / 4;
+  centerTemp = (tempValues[383 - 16] + tempValues[383 - 15] + tempValues[384 + 15] + tempValues[384 + 16]) / 4;
   Display.setCursor(86, 214);
   Display.setTextColor(TFT_WHITE, TFT_BLACK);
   Display.setTextFont(2);
