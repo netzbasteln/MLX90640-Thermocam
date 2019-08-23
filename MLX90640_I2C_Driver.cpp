@@ -1,22 +1,17 @@
 /**
    @copyright (C) 2017 Melexis N.V.
-
    Licensed under the Apache License, Version 2.0 (the "License");
    you may not use this file except in compliance with the License.
    You may obtain a copy of the License at
-
        http://www.apache.org/licenses/LICENSE-2.0
-
    Unless required by applicable law or agreed to in writing, software
    distributed under the License is distributed on an "AS IS" BASIS,
    WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
    See the License for the specific language governing permissions and
    limitations under the License.
-
 */
 
 
-#include<Arduino.h>
 #include <Wire.h>
 
 #include "MLX90640_I2C_Driver.h"
@@ -44,34 +39,28 @@ int MLX90640_I2CRead(uint8_t _deviceAddress, unsigned int startAddress, unsigned
     Wire.beginTransmission(_deviceAddress);
     Wire.write(startAddress >> 8); //MSB
     Wire.write(startAddress & 0xFF); //LSB
-    // Don't use the following code on ESP32, currently its Arduino I2C core is broken for this usage:
-    //if (Wire.endTransmission(false) != 0) //Do not release bus
-    //{
-    //  Serial.println("No ack read");
-    //  return (0); //Sensor did not ACK
-    //}
-    // Instead use the Wire.transact further below.
+    if (Wire.endTransmission(false) != 0) //Do not release bus
+    {
+      Serial.println("No ack read");
+      return (0); //Sensor did not ACK
+    }
 
     uint16_t numberOfBytesToRead = bytesRemaining;
     if (numberOfBytesToRead > I2C_BUFFER_LENGTH) numberOfBytesToRead = I2C_BUFFER_LENGTH;
-    
-    // Make a new buffer to hold the Wire.transact result.
-    uint8_t _transact_buffer[I2C_BUFFER_LENGTH];
-    int err = Wire.transact(_transact_buffer, numberOfBytesToRead);
-    if (err != numberOfBytesToRead) {
-      Serial.print("Failed to read expected I2C bytes!");
-      return (0);
+
+    Wire.requestFrom((uint8_t)_deviceAddress, numberOfBytesToRead);
+    if (Wire.available())
+    {
+      for (uint16_t x = 0 ; x < numberOfBytesToRead / 2; x++)
+      {
+        //Store data into array
+        data[dataSpot] = Wire.read() << 8; //MSB
+        data[dataSpot] |= Wire.read(); //LSB
+
+        dataSpot++;
+      }
     }
 
-    // Now copy the transaction data out of the buffer and into the result.
-    for (uint16_t x = 0 ; x < numberOfBytesToRead; x += 2)
-    {
-      //Store data into array
-      data[dataSpot] = _transact_buffer[x] << 8; //MSB
-      data[dataSpot] |= _transact_buffer[x+1]; //LSB
-      dataSpot++;
-    }
-    
     bytesRemaining -= numberOfBytesToRead;
 
     startAddress += numberOfBytesToRead / 2;
@@ -79,7 +68,6 @@ int MLX90640_I2CRead(uint8_t _deviceAddress, unsigned int startAddress, unsigned
 
   return (0); //Success
 }
-
 
 //Set I2C Freq, in kHz
 //MLX90640_I2CFreqSet(1000) sets frequency to 1MHz
