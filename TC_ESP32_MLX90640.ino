@@ -69,8 +69,10 @@ static float tempValues[32*24];
 #define O_HEIGHT 168
 #define O_RATIO O_WIDTH/32
 
-float *interpolated[O_HEIGHT];
-
+//float *interpolated[O_HEIGHT];
+//uint8_t *bitmap[O_HEIGHT * O_WIDTH];
+float **interpolated = NULL;
+uint16_t *imageData = NULL;
 
 void setup() {
   Serial.begin(115200);
@@ -108,13 +110,13 @@ void setup() {
 
 
   // Prepare interpolated array
+  interpolated = (float **)malloc(O_HEIGHT * sizeof(float *));
   for (int i=0; i<O_HEIGHT; i++) {
     interpolated[i] = (float *)malloc(O_WIDTH * sizeof(float));
-    if (!interpolated[i]) {
-      Serial.println("Out of memory :(");
-    }
   }
 
+  // Prepare imageData array
+  imageData = (uint16_t *)malloc(O_WIDTH * O_HEIGHT * sizeof(uint16_t));
 
   // get the cutoff points for the color interpolation routines
   // note this function called when the temp scale is changed
@@ -162,7 +164,7 @@ float temp, temp2;
 void interpolate() {
   for (row=0; row<24; row++) {
     for (x=0; x<O_WIDTH; x++) {
-      temp =  tempValues[(31 - (x/7)) + (row*32)];
+      temp  = tempValues[(31 - (x/7)) + (row*32)];
       temp2 = tempValues[(31 - (x/7)) + (row*32) + 1]; //
       interpolated[row*7][x] = lerp(temp2, temp, x%7/7.0);
     }
@@ -170,26 +172,28 @@ void interpolate() {
 
   for (x=0; x<O_WIDTH; x++) {
     for (y=0; y<O_HEIGHT; y++) {
-      temp =  interpolated[(y/7)*7][x];
-      temp2 = interpolated[((y/7+1)*7)][x];
-      interpolated[y][x] = lerp(temp2, temp, y%7/7.0);
+      temp  = interpolated[y-y%7][x];
+      temp2 = interpolated[min((y-y%7)+7, O_HEIGHT-7)][x];
+      interpolated[y][x] = lerp(temp, temp2, y%7/7.0);
     }
   }
 }
 
 
-// Helper for linear interpolation
+// Linear interpolation
 float lerp(float v0, float v1, float t) {
-  return (1 - t) * v0 + t * v1;
+  return v0 + t * (v1 - v0);
 }
 
 
 void drawPicture() {
-  for (y=0; y<=O_HEIGHT; y++) {
+  for (y=0; y<O_HEIGHT; y++) {
     for (x=0; x<O_WIDTH; x++) {
-      Display.drawPixel(8 + x, 8 + y, getColor(interpolated[y][x]));
+      imageData[(y*O_WIDTH) + x] = getColor(interpolated[y][x]);
     }
   }
+  
+  Display.pushImage(8, 8, O_WIDTH, O_HEIGHT, imageData);
 }
 
 
