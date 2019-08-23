@@ -11,6 +11,7 @@
    limitations under the License.
 */
 
+#include<Arduino.h>
 
 #include <Wire.h>
 

@@ -7,10 +7,6 @@
  * - ESP32: https://www.espressif.com/en/products/hardware/esp32-devkitc/overview
  * - Sensor: https://shop.pimoroni.com/products/mlx90640-thermal-camera-breakout
  * - Display: https://www.amazon.de/gp/product/B07DPMV34R/, https://www.pjrc.com/store/display_ili9341.html
- * 
- * Needs an ESP32 core fork:
- * - https://github.com/sparkfun/SparkFun_MLX90640_Arduino_Example/issues/2
- * - https://github.com/stickbreaker/arduino-esp32
  */
 
 
