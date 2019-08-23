@@ -18,6 +18,8 @@
 #include "MLX90640_API.h"
 #include "MLX90640_I2C_Driver.h"
 
+#define EMMISIVITY 0.95
+#define INTERPOLATE false
 
 #define C_BLUE Display.color565(0,0,255)
 #define C_RED Display.color565(255,0,0)
@@ -28,11 +30,8 @@
 #define C_DKGREY Display.color565(80,80,80)
 #define C_GREY Display.color565(127,127,127)
 
-
 #define min(a,b) ((a)<(b)?(a):(b))
 #define max(a,b) ((a)>(b)?(a):(b))
-
-#define EMMISIVITY 0.95
 
 const byte MLX90640_address = 0x33; //Default 7-bit unshifted address of the MLX90640
 #define TA_SHIFT 8 //Default shift for MLX90640 in open air
@@ -69,8 +68,6 @@ static float tempValues[32*24];
 #define O_HEIGHT 168
 #define O_RATIO O_WIDTH/32
 
-//float *interpolated[O_HEIGHT];
-//uint8_t *bitmap[O_HEIGHT * O_WIDTH];
 float **interpolated = NULL;
 uint16_t *imageData = NULL;
 
@@ -127,10 +124,9 @@ void setup() {
 
 void loop() {
   tempTime = millis();
-
+  
   readTempValues();
   setTempScale();
-  interpolate();
   drawPicture();
   drawMeasurement();
 }
@@ -138,7 +134,7 @@ void loop() {
 
 // Read pixel data from MLX90640.
 void readTempValues() {
-  for (byte x = 0 ; x < 2 ; x++) //Read both subpages
+  for (byte x = 0 ; x < 2 ; x++) // Read both subpages
   {
     uint16_t mlx90640Frame[834];
     int status = MLX90640_GetFrameData(MLX90640_address, mlx90640Frame);
@@ -164,17 +160,16 @@ float temp, temp2;
 void interpolate() {
   for (row=0; row<24; row++) {
     for (x=0; x<O_WIDTH; x++) {
-      temp  = tempValues[(31 - (x/7)) + (row*32)];
-      temp2 = tempValues[(31 - (x/7)) + (row*32) + 1]; //
-      interpolated[row*7][x] = lerp(temp2, temp, x%7/7.0);
+      temp  = tempValues[(31 - (x/7)) + (row*32) + 1];
+      temp2 = tempValues[(31 - (x/7)) + (row*32)];
+      interpolated[row*7][x] = lerp(temp, temp2, x%7/7.0);
     }
   }
-
   for (x=0; x<O_WIDTH; x++) {
     for (y=0; y<O_HEIGHT; y++) {
       temp  = interpolated[y-y%7][x];
       temp2 = interpolated[min((y-y%7)+7, O_HEIGHT-7)][x];
-      interpolated[y][x] = lerp(temp, temp2, y%7/7.0);
+      interpolated[y][x] = lerp(temp, temp2, 1);//y%7/7.0);
     }
   }
 }
@@ -187,13 +182,22 @@ float lerp(float v0, float v1, float t) {
 
 
 void drawPicture() {
-  for (y=0; y<O_HEIGHT; y++) {
-    for (x=0; x<O_WIDTH; x++) {
-      imageData[(y*O_WIDTH) + x] = getColor(interpolated[y][x]);
+  if (INTERPOLATE) {
+    interpolate();
+    for (y=0; y<O_HEIGHT; y++) {
+      for (x=0; x<O_WIDTH; x++) {
+        imageData[(y*O_WIDTH) + x] = getColor(interpolated[y][x]);
+      }
+    }
+    Display.pushImage(8, 8, O_WIDTH, O_HEIGHT, imageData);
+  }
+  else {
+    for (y=0; y<24; y++) {
+      for (x=0; x<32; x++) {
+        Display.fillRect(8 + x*7, 8 + y*7, 7, 7, getColor(tempValues[(31-x) + (y*32)]));
+      }
     }
   }
-  
-  Display.pushImage(8, 8, O_WIDTH, O_HEIGHT, imageData);
 }
 
 
