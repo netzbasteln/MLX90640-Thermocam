@@ -18,6 +18,8 @@
 #include "MLX90640_API.h"
 #include "MLX90640_I2C_Driver.h"
 
+#define EMMISIVITY 0.95
+#define INTERPOLATE false
 
 #define C_BLUE Display.color565(0,0,255)
 #define C_RED Display.color565(255,0,0)
@@ -28,10 +30,8 @@
 #define C_DKGREY Display.color565(80,80,80)
 #define C_GREY Display.color565(127,127,127)
 
-
 #define min(a,b) ((a)<(b)?(a):(b))
 #define max(a,b) ((a)>(b)?(a):(b))
-
 
 const byte MLX90640_address = 0x33; //Default 7-bit unshifted address of the MLX90640
 #define TA_SHIFT 8 //Default shift for MLX90640 in open air
@@ -46,7 +46,6 @@ boolean measure = true;
 float centerTemp;
 unsigned long tempTime = millis();
 unsigned long tempTime2 = 0;
-unsigned long batteryTime = 1;
 
 // start with some initial colors
 float minTemp = 20.0;
@@ -61,10 +60,16 @@ float intPoint, val, a, b, c, d, ii;
 int x, y, i, j;
 
 
-// array for the 32 x 24 measured pixels
-static float pixels[768];
+// array for the 32 x 24 measured tempValues
+static float tempValues[32*24];
 
+// Output size
+#define O_WIDTH 224
+#define O_HEIGHT 168
+#define O_RATIO O_WIDTH/32
 
+float **interpolated = NULL;
+uint16_t *imageData = NULL;
 
 void setup() {
   Serial.begin(115200);
@@ -100,6 +105,16 @@ void setup() {
   //Display.setRotation(3);
   Display.fillScreen(C_BLACK);
 
+
+  // Prepare interpolated array
+  interpolated = (float **)malloc(O_HEIGHT * sizeof(float *));
+  for (int i=0; i<O_HEIGHT; i++) {
+    interpolated[i] = (float *)malloc(O_WIDTH * sizeof(float));
+  }
+
+  // Prepare imageData array
+  imageData = (uint16_t *)malloc(O_WIDTH * O_HEIGHT * sizeof(uint16_t));
+
   // get the cutoff points for the color interpolation routines
   // note this function called when the temp scale is changed
   setAbcd();
@@ -109,8 +124,8 @@ void setup() {
 
 void loop() {
   tempTime = millis();
-
-  readPixels();
+  
+  readTempValues();
   setTempScale();
   drawPicture();
   drawMeasurement();
@@ -118,10 +133,8 @@ void loop() {
 
 
 // Read pixel data from MLX90640.
-void readPixels() {
-  float emissivity = 0.95;
-  
-  for (byte x = 0 ; x < 2 ; x++) //Read both subpages
+void readTempValues() {
+  for (byte x = 0 ; x < 2 ; x++) // Read both subpages
   {
     uint16_t mlx90640Frame[834];
     int status = MLX90640_GetFrameData(MLX90640_address, mlx90640Frame);
@@ -134,21 +147,59 @@ void readPixels() {
     float vdd = MLX90640_GetVdd(mlx90640Frame, &mlx90640);
     float Ta = MLX90640_GetTa(mlx90640Frame, &mlx90640);
 
-    float tr = Ta - TA_SHIFT; //Reflected temperature based on the sensor ambient temperature  
+    float tr = Ta - TA_SHIFT; //Reflected temperature based on the sensor ambient temperature
 
-    MLX90640_CalculateTo(mlx90640Frame, &mlx90640, emissivity, tr, pixels);
+    MLX90640_CalculateTo(mlx90640Frame, &mlx90640, EMMISIVITY, tr, tempValues);
   }
 }
 
 
-// Show 32x24 sensor data on the top part of the 240x320 screen.
-void drawPicture() {
-  for (y=0; y<24; y++) {
-    for (x=0; x<32; x++) {
-      Display.fillRect(8 + x*7, 8 + y*7, 7, 7, getColor(pixels[(31-x) + (y*32)]));
+int row;
+float temp, temp2;
+
+void interpolate() {
+  for (row=0; row<24; row++) {
+    for (x=0; x<O_WIDTH; x++) {
+      temp  = tempValues[(31 - (x/7)) + (row*32) + 1];
+      temp2 = tempValues[(31 - (x/7)) + (row*32)];
+      interpolated[row*7][x] = lerp(temp, temp2, x%7/7.0);
+    }
+  }
+  for (x=0; x<O_WIDTH; x++) {
+    for (y=0; y<O_HEIGHT; y++) {
+      temp  = interpolated[y-y%7][x];
+      temp2 = interpolated[min((y-y%7)+7, O_HEIGHT-7)][x];
+      interpolated[y][x] = lerp(temp, temp2, 1);//y%7/7.0);
     }
   }
 }
+
+
+// Linear interpolation
+float lerp(float v0, float v1, float t) {
+  return v0 + t * (v1 - v0);
+}
+
+
+void drawPicture() {
+  if (INTERPOLATE) {
+    interpolate();
+    for (y=0; y<O_HEIGHT; y++) {
+      for (x=0; x<O_WIDTH; x++) {
+        imageData[(y*O_WIDTH) + x] = getColor(interpolated[y][x]);
+      }
+    }
+    Display.pushImage(8, 8, O_WIDTH, O_HEIGHT, imageData);
+  }
+  else {
+    for (y=0; y<24; y++) {
+      for (x=0; x<32; x++) {
+        Display.fillRect(8 + x*7, 8 + y*7, 7, 7, getColor(tempValues[(31-x) + (y*32)]));
+      }
+    }
+  }
+}
+
 
 
 // Get color for temp value.
@@ -160,7 +211,7 @@ uint16_t getColor(float val) {
 
     equations based on
     http://web-tech.ga-usa.com/2012/05/creating-a-custom-hot-to-cold-temperature-color-gradient-for-use-with-rrdtool/index.html
-    
+
   */
 
   red = constrain(255.0 / (c - b) * val - ((b * 255.0) / (c - b)), 0, 255);
@@ -198,8 +249,8 @@ void setTempScale() {
   maxTemp = 0;
 
   for (i = 0; i < 768; i++) {
-    minTemp = min(minTemp, pixels[i]);
-    maxTemp = max(maxTemp, pixels[i]);
+    minTemp = min(minTemp, tempValues[i]);
+    maxTemp = max(maxTemp, tempValues[i]);
   }
 
   setAbcd();
@@ -245,7 +296,7 @@ void drawMeasurement() {
   Display.drawCircle(120, 8+84, 3, TFT_WHITE);
 
   // Measure and print center temperature
-  centerTemp = (pixels[383 - 16] + pixels[383 - 15] + pixels[384 + 15] + pixels[384 + 16]) / 4;
+  centerTemp = (tempValues[383 - 16] + tempValues[383 - 15] + tempValues[384 + 15] + tempValues[384 + 16]) / 4;
   Display.setCursor(86, 214);
   Display.setTextColor(TFT_WHITE, TFT_BLACK);
   Display.setTextFont(2);
